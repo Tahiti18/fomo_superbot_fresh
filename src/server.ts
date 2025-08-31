@@ -1,34 +1,46 @@
-import "dotenv/config";
 import express from "express";
 import { Bot, webhookCallback } from "grammy";
-import { pingDb } from "./db.js";
+import type { Context } from "grammy";
+import { scanHandler } from "./handlers/scan";
 
-const TOKEN = process.env.BOT_TOKEN;
-if (!TOKEN) {
-  console.error("BOT_TOKEN is missing");
-  process.exit(1);
+const PORT = parseInt(process.env.PORT || "8080", 10);
+const BOT_TOKEN = process.env.BOT_TOKEN!;
+const BOT_SECRET = process.env.BOT_SECRET || ""; // optional secret for webhook path hardening
+
+if (!BOT_TOKEN) {
+  throw new Error("BOT_TOKEN is missing!");
 }
-const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET || "";
-
-const bot = new Bot(TOKEN);
-bot.command("start", (ctx) => ctx.reply("FOMO Superbot is alive ✅"));
-bot.on("message:text", (ctx) => ctx.reply(`You said: ${ctx.message.text}`));
 
 const app = express();
 app.use(express.json());
 
-app.get("/", (_req, res) => res.send("FOMO Superbot API"));
-app.get("/health", async (_req, res) => {
-  await pingDb().catch(() => {});
-  res.type("text/plain").send("OK");
+// --- Telegram bot ---
+const bot = new Bot<Context>(BOT_TOKEN);
+
+// Basic commands
+bot.command("start", async (ctx) => {
+  await ctx.reply(
+    "Welcome to FOMO Superbot 🚀\n\nTry:\n/status – check liveness\n/scan <token_address> – scan a token (stub)"
+  );
 });
 
-app.post("/tg/webhook", (req, res, next) => {
-  if (WEBHOOK_SECRET && req.query.secret !== WEBHOOK_SECRET) {
-    return res.status(401).send("Unauthorized");
-  }
-  next();
-}, webhookCallback(bot, "express"));
+bot.command("status", async (ctx) => {
+  await ctx.reply("FOMO Superbot is alive ✅");
+});
 
-const PORT = Number(process.env.PORT) || 8080;
-app.listen(PORT, () => console.log(`Listening on ${PORT}`));
+// New: /scan
+bot.command("scan", scanHandler);
+
+// Health endpoint for Railway
+app.get("/health", (_req, res) => res.send("OK"));
+
+// Telegram webhook endpoint
+const webhookPath = BOT_SECRET ? `/tg/webhook/${BOT_SECRET}` : "/tg/webhook";
+app.use(webhookPath, webhookCallback(bot, "express"));
+
+// Root info
+app.get("/", (_req, res) => res.send("FOMO Superbot API"));
+
+app.listen(PORT, () => {
+  console.log(`Listening on ${PORT}`);
+});
